@@ -7,7 +7,7 @@ from voice_api import record_voice
 from config import Config
 
 # Configuration settings (from both files)
-
+st.set_page_config(page_title="🎙️ Vodafone | Gen AI Consultant", layout="wide")
 # Initialize OpenAI client using secrets
 def get_openai_client():
     try:
@@ -113,8 +113,7 @@ def get_answer(question, history=[]):
 
 # Main function
 def main():
-    # Set up page configuration
-    st.set_page_config(page_title="🎙️ Vodafone | Gen AI Consultant", layout="wide")
+    
     
     # Try to load the logo
     try:
