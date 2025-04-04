@@ -30,7 +30,7 @@ def get_base64_image(image_path):
     return base64.b64encode(data).decode()
 
 # Function to handle text-to-speech
-def speak_text(text):
+def speak_text(text,ai_message):
     """
     Generate speech using OpenAI's Text-to-Speech API
     
@@ -51,6 +51,7 @@ def speak_text(text):
         # Convert response directly to base64
         audio_bytes = response.read()
         b64_audio = base64.b64encode(audio_bytes).decode()
+        print_chat_message(ai_message)
         
         # Inject hidden autoplay audio using HTML
         audio_html = f"""
@@ -164,10 +165,9 @@ def main():
         
         # Display the answer
         ai_message = {"role": "assistant", "content": answer}
-        print_chat_message(ai_message)
         
         # Convert answer to speech
-        speak_text(answer)
+        speak_text(answer,ai_message)
         
         # Add the message to history
         st.session_state.chat_history.append(ai_message)
