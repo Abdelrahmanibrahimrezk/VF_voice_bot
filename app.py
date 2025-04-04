@@ -10,14 +10,13 @@ from config import Config
 st.set_page_config(page_title="🎙️ Vodafone | Gen AI Consultant", layout="wide")
 
 # Initialize OpenAI client using secrets
+@st.cache_resource
 def get_openai_client():
     try:
-        # Get API key from Streamlit secrets
         api_key = st.secrets["openai"]["api_key"]
         return OpenAI(api_key=api_key)
     except Exception as e:
         st.error(f"Error initializing OpenAI client: {str(e)}")
-        st.error("Please make sure you've set up your OpenAI API key in Streamlit Secrets.")
         return None
 
 # Get the client
