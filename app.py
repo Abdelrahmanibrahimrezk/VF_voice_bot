@@ -6,8 +6,9 @@ import time
 from voice_api import record_voice
 from config import Config
 
-# Configuration settings (from both files)
+# Set page configuration as the very first Streamlit command
 st.set_page_config(page_title="🎙️ Vodafone | Gen AI Consultant", layout="wide")
+
 # Initialize OpenAI client using secrets
 def get_openai_client():
     try:
@@ -22,7 +23,6 @@ def get_openai_client():
 # Get the client
 client = get_openai_client()
 
-
 # Function to encode image to base64
 def get_base64_image(image_path):
     with open(image_path, "rb") as f:
@@ -30,17 +30,16 @@ def get_base64_image(image_path):
     return base64.b64encode(data).decode()
 
 # Function to handle text-to-speech
-def speak_text(text, lang="en"):
+def speak_text(text):
     """
     Generate speech using OpenAI's Text-to-Speech API
     
     Args:
         text (str): Text to convert to speech
-        lang (str): Language code (currently supports 'en' and 'ar')
     """
     try:
-        # Select voice based on language
-        voice = "alloy" if lang == "en" else "shimmer"
+        # Use 'alloy' voice for English
+        voice = "alloy"
         
         # Generate speech
         response = client.audio.speech.create(
@@ -64,23 +63,17 @@ def speak_text(text, lang="en"):
     except Exception as e:
         st.error(f"❌ TTS failed: {str(e)}")
 
-# Function to print text with RTL support for Arabic
-def print_txt(text):
-    if any("\u0600" <= c <= "\u06FF" for c in text):  # Arabic text detection
-        text = f"<p style='direction: rtl; text-align: right;'>{text}</p>"
-    st.markdown(text, unsafe_allow_html=True)
-
 # Function to print chat messages with the right formatting
 def print_chat_message(message):
     text = message["content"]
     if message["role"] == "user":
         with st.chat_message("user", avatar="🎙️"):
-            print_txt(text)
+            st.markdown(text)
     else:
         with st.chat_message("assistant", avatar="🤖"):
-            print_txt(text)
+            st.markdown(text)
 
-# Function to get answer from the model directly (replacing streaming)
+# Function to get answer from the model directly
 def get_answer(question, history=[]):
     if question.strip() == "":
         return Config.fall_back_msg
@@ -113,8 +106,6 @@ def get_answer(question, history=[]):
 
 # Main function
 def main():
-    
-    
     # Try to load the logo
     try:
         image_base64 = get_base64_image("./vodafone.png")
@@ -130,15 +121,29 @@ def main():
     except Exception:
         st.title("🎙️ Vodafone | Gen AI Consultant")
     
-    # Sidebar for language selection and voice input
-    st.sidebar.title("Ask your question in English or Arabic")
+    # Sidebar for input method selection
+    st.sidebar.title("Ask your question")
     
-    def language_selector():
+    # Toggle between voice and text input
+    input_method = st.sidebar.radio("Input Method", ["Text", "Voice"])
+    
+    # Get user question based on selected input method
+    question = None
+    
+    if input_method == "Voice":
         with st.sidebar:
-            return st.selectbox("Speech Language", ["en", "ar"])
-    
-    with st.sidebar:
-        question = record_voice(language=language_selector())
+            st.write("Click to record your voice question:")
+            question = record_voice(language="en")
+    else:  # Text input
+        with st.sidebar:
+            question = st.text_area("Type your question:", height=100)
+            if st.button("Submit"):
+                # This will trigger the question processing
+                pass
+            else:
+                # If the button wasn't pressed, don't process empty text input
+                if not st.session_state.get("submitted", False):
+                    question = None
     
     # Initialize chat history
     if "chat_history" not in st.session_state:
@@ -162,8 +167,7 @@ def main():
         print_chat_message(ai_message)
         
         # Convert answer to speech
-        lang = "ar" if any("\u0600" <= c <= "\u06FF" for c in answer) else "en"
-        speak_text(answer, lang=lang)
+        speak_text(answer)
         
         # Add the message to history
         st.session_state.chat_history.append(ai_message)
@@ -171,6 +175,9 @@ def main():
         # Keep only last 20 messages for context window management
         if len(st.session_state.chat_history) > 20:
             st.session_state.chat_history = st.session_state.chat_history[-20:]
+        
+        # Reset the submitted state for text input
+        st.session_state["submitted"] = False
 
 if __name__ == "__main__":
     main()
