@@ -1,6 +1,6 @@
 class Config:
     fall_back_msg = "I'm Your Vodafone AI Consultant, How can I help you today ? "
-    model = "gpt-4o"
+    model = "gpt-3.5-turbo"
     temperature=0.0
     port = 8000
 
