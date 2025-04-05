@@ -28,38 +28,85 @@ def get_base64_image(image_path):
         data = f.read()
     return base64.b64encode(data).decode()
 
+# Function to split text into chunks of maximum length
+def split_text_for_tts(text, max_length=4000):
+    """
+    Split text into chunks that fit within the TTS character limit
+    
+    Args:
+        text (str): Text to split
+        max_length (int): Maximum length of each chunk
+    
+    Returns:
+        list: List of text chunks
+    """
+    # Split by sentences for more natural breaks
+    sentences = []
+    for paragraph in text.split('\n'):
+        for sentence in paragraph.split('. '):
+            if sentence:
+                sentences.append(sentence + ('' if sentence.endswith('.') else '.'))
+    
+    chunks = []
+    current_chunk = ""
+    
+    for sentence in sentences:
+        # If adding this sentence would exceed the limit, start a new chunk
+        if len(current_chunk) + len(sentence) + 1 > max_length:
+            chunks.append(current_chunk)
+            current_chunk = sentence
+        else:
+            if current_chunk:
+                current_chunk += " " + sentence
+            else:
+                current_chunk = sentence
+    
+    # Add the last chunk if it has content
+    if current_chunk:
+        chunks.append(current_chunk)
+    
+    return chunks
+
 # Function to handle text-to-speech
-def speak_text(text,ai_message):
+def speak_text(text, ai_message):
     """
     Generate speech using OpenAI's Text-to-Speech API
     
     Args:
         text (str): Text to convert to speech
+        ai_message (dict): The AI message for display
     """
     try:
         print_chat_message(ai_message)
-        # Use 'alloy' voice for English
-        voice = "alloy"
         
-        # Generate speech
-        response = client.audio.speech.create(
-            model="tts-1",
-            voice=voice,
-            input=text,
-        )
+        # Split text into chunks that fit within the TTS character limit
+        text_chunks = split_text_for_tts(text)
         
-        # Convert response directly to base64
-        audio_bytes = response.read()
-        b64_audio = base64.b64encode(audio_bytes).decode()
-        
-        
-        # Inject hidden autoplay audio using HTML
-        audio_html = f"""
-        <audio autoplay="true" hidden>
-            <source src="data:audio/mp3;base64,{b64_audio}" type="audio/mp3">
-        </audio>
-        """
-        st.markdown(audio_html, unsafe_allow_html=True)
+        for chunk in text_chunks:
+            # Use 'alloy' voice for English
+            voice = "alloy"
+            
+            # Generate speech for this chunk
+            response = client.audio.speech.create(
+                model="tts-1",
+                voice=voice,
+                input=chunk,
+            )
+            
+            # Convert response directly to base64
+            audio_bytes = response.read()
+            b64_audio = base64.b64encode(audio_bytes).decode()
+            
+            # Inject hidden autoplay audio using HTML
+            audio_html = f"""
+            <audio autoplay="true" hidden>
+                <source src="data:audio/mp3;base64,{b64_audio}" type="audio/mp3">
+            </audio>
+            """
+            st.markdown(audio_html, unsafe_allow_html=True)
+            
+            # Add a small delay between chunks for more natural speech
+            time.sleep(0.5)
     
     except Exception as e:
         st.error(f"❌ TTS failed: {str(e)}")
@@ -140,7 +187,7 @@ def main():
             question = st.text_area("Type your question:", height=100)
             if st.button("Submit"):
                 # This will trigger the question processing
-                pass
+                st.session_state["submitted"] = True
             else:
                 # If the button wasn't pressed, don't process empty text input
                 if not st.session_state.get("submitted", False):
@@ -167,7 +214,7 @@ def main():
         ai_message = {"role": "assistant", "content": answer}
         
         # Convert answer to speech
-        speak_text(answer,ai_message)
+        speak_text(answer, ai_message)
         
         # Add the message to history
         st.session_state.chat_history.append(ai_message)
