@@ -3,8 +3,10 @@ import streamlit as st
 from openai import OpenAI
 import base64
 import time
+import uuid
 from voice_api import record_voice
 from config import Config
+import concurrent.futures
 
 # Set page configuration as the very first Streamlit command
 st.set_page_config(page_title="🎙️ Vodafone | Gen AI Consultant", layout="wide")
@@ -29,7 +31,7 @@ def get_base64_image(image_path):
     return base64.b64encode(data).decode()
 
 # Function to split text into chunks of maximum length
-def split_text_for_tts(text, max_length=4000):
+def split_text_for_tts(text, max_length=2000):
     """
     Split text into chunks that fit within the TTS character limit
     
@@ -67,10 +69,36 @@ def split_text_for_tts(text, max_length=4000):
     
     return chunks
 
-# Function to handle text-to-speech
+# Function to generate speech for a single chunk
+def generate_speech(chunk):
+    """
+    Generate speech for a text chunk using OpenAI's TTS API
+    
+    Args:
+        chunk (str): Text chunk to convert to speech
+    
+    Returns:
+        str: Base64 encoded audio data
+    """
+    try:
+        # Use a faster voice model
+        response = client.audio.speech.create(
+            model="tts-1-echo",  # Using the faster model
+            voice="alloy",
+            input=chunk,
+        )
+        
+        # Convert response directly to base64
+        audio_bytes = response.read()
+        return base64.b64encode(audio_bytes).decode()
+    except Exception as e:
+        st.error(f"❌ TTS chunk generation failed: {str(e)}")
+        return None
+
+# Function to handle text-to-speech with sequential playback
 def speak_text(text, ai_message):
     """
-    Generate speech using OpenAI's Text-to-Speech API
+    Generate speech using OpenAI's Text-to-Speech API and play sequentially
     
     Args:
         text (str): Text to convert to speech
@@ -82,31 +110,65 @@ def speak_text(text, ai_message):
         # Split text into chunks that fit within the TTS character limit
         text_chunks = split_text_for_tts(text)
         
-        for chunk in text_chunks:
-            # Use 'alloy' voice for English
-            voice = "alloy"
+        # Process chunks in parallel to generate audio
+        audio_elements = []
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future_to_chunk = {executor.submit(generate_speech, chunk): i for i, chunk in enumerate(text_chunks)}
+            # Sort by original chunk order
+            for i in range(len(text_chunks)):
+                for future, idx in future_to_chunk.items():
+                    if idx == i and future.done():
+                        b64_audio = future.result()
+                        if b64_audio:
+                            audio_elements.append(b64_audio)
+                        break
+        
+        # Create sequential audio player with callbacks
+        if audio_elements:
+            # Create unique IDs for each audio element
+            audio_ids = [f"audio-{uuid.uuid4()}" for _ in range(len(audio_elements))]
             
-            # Generate speech for this chunk
-            response = client.audio.speech.create(
-                model="tts-1",
-                voice=voice,
-                input=chunk,
-            )
+            # Create custom JavaScript to handle sequential playback
+            js_code = """
+            <script>
+                const audioIds = %s;
+                const audioElements = [];
+                
+                function setupAudio() {
+                    for (let i = 0; i < audioIds.length; i++) {
+                        const audio = document.getElementById(audioIds[i]);
+                        audioElements.push(audio);
+                        
+                        // Connect sequential playback
+                        if (i < audioIds.length - 1) {
+                            audio.onended = function() {
+                                audioElements[i+1].play();
+                            };
+                        }
+                    }
+                    
+                    // Start playing the first audio
+                    if (audioElements.length > 0) {
+                        audioElements[0].play();
+                    }
+                }
+                
+                // Setup after a short delay to ensure elements are loaded
+                setTimeout(setupAudio, 100);
+            </script>
+            """ % str(audio_ids)
             
-            # Convert response directly to base64
-            audio_bytes = response.read()
-            b64_audio = base64.b64encode(audio_bytes).decode()
+            # Add audio elements to the page (hidden)
+            for i, b64_audio in enumerate(audio_elements):
+                audio_html = f"""
+                <audio id="{audio_ids[i]}" preload="auto" hidden>
+                    <source src="data:audio/mp3;base64,{b64_audio}" type="audio/mp3">
+                </audio>
+                """
+                st.markdown(audio_html, unsafe_allow_html=True)
             
-            # Inject hidden autoplay audio using HTML
-            audio_html = f"""
-            <audio autoplay="true" hidden>
-                <source src="data:audio/mp3;base64,{b64_audio}" type="audio/mp3">
-            </audio>
-            """
-            st.markdown(audio_html, unsafe_allow_html=True)
-            
-            # Add a small delay between chunks for more natural speech
-            time.sleep(0.5)
+            # Add the JavaScript for sequential playback
+            st.markdown(js_code, unsafe_allow_html=True)
     
     except Exception as e:
         st.error(f"❌ TTS failed: {str(e)}")
