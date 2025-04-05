@@ -37,6 +37,7 @@ def speak_text(text,ai_message):
         text (str): Text to convert to speech
     """
     try:
+        print_chat_message(ai_message)
         # Use 'alloy' voice for English
         voice = "alloy"
         
@@ -50,7 +51,7 @@ def speak_text(text,ai_message):
         # Convert response directly to base64
         audio_bytes = response.read()
         b64_audio = base64.b64encode(audio_bytes).decode()
-        print_chat_message(ai_message)
+        
         
         # Inject hidden autoplay audio using HTML
         audio_html = f"""
