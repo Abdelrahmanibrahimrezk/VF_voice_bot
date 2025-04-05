@@ -67,7 +67,7 @@ def split_text_for_tts(text, max_length=4000):
     
     return chunks
 
-# Function to handle text-to-speech with streaming playback
+# Function to handle text-to-speech
 def speak_text(text, ai_message):
     try:
         # Display the AI message
@@ -76,58 +76,49 @@ def speak_text(text, ai_message):
         # Split text into chunks
         text_chunks = split_text_for_tts(text)
 
-        # Initialize audio queue in the frontend
-        init_js = """
-        <script>
-            // Initialize audio queue and current audio if not exists
-            if (!window.audioQueue) {
-                window.audioQueue = [];
-                window.currentAudio = null;
-                
-                function playNext() {
-                    if (window.audioQueue.length > 0 && !window.currentAudio) {
-                        window.currentAudio = window.audioQueue.shift();
-                        window.currentAudio.onended = () => {
-                            window.currentAudio = null;
-                            playNext();
-                        };
-                        window.currentAudio.play().catch(error => {
-                            console.log('Autoplay prevented. Click anywhere to start audio.');
-                        });
-                    }
-                }
-            }
-        </script>
-        """
-        st.components.v1.html(init_js, height=0)
+        # Prepare list of audio base64 chunks
+        audio_b64_chunks = []
 
-        # Process each chunk and stream audio
-        for chunk in text_chunks:
+        for i, chunk in enumerate(text_chunks):
             if chunk.strip():
                 try:
-                    # Generate audio for this chunk
                     response = client.audio.speech.create(
-                        model="tts-1",
+                        model="tts-1",  # use correct model
                         voice="alloy",
                         input=chunk,
                     )
                     audio_bytes = response.read()
                     b64_audio = base64.b64encode(audio_bytes).decode()
-
-                    # Create JS to add this audio to the queue
-                    chunk_js = f"""
-                    <script>
-                        (function() {{
-                            const audio = new Audio("data:audio/mp3;base64,{b64_audio}");
-                            window.audioQueue.push(audio);
-                            if (!window.currentAudio) playNext();
-                        }})();
-                    </script>
-                    """
-                    st.components.v1.html(chunk_js, height=0)
-
+                    audio_b64_chunks.append(b64_audio)
                 except Exception as e:
-                    st.error(f"❌ TTS chunk generation failed: {str(e)}")
+                    st.error(f"❌ TTS chunk {i} generation failed: {str(e)}")
+
+        # Generate JavaScript to play each chunk sequentially
+        js_chunks = ""
+        for i, b64 in enumerate(audio_b64_chunks):
+            js_chunks += f"""
+                audios[{i}] = new Audio("data:audio/mp3;base64,{b64}");
+            """
+
+        js_play_sequence = """
+        <script>
+            const audios = [];
+            let current = 0;
+
+            function playNext() {
+                if (current < audios.length) {
+                    audios[current].onended = playNext;
+                    audios[current].play();
+                    current++;
+                }
+            }
+
+            """ + js_chunks + """
+            playNext();
+        </script>
+        """
+
+        st.components.v1.html(js_play_sequence, height=0)
     except Exception as e:
         st.error(f"❌ TTS failed: {str(e)}")
 
