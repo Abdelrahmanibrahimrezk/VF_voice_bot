@@ -92,7 +92,7 @@ def speak_text(text, ai_message):
                 try:
                     # Use a faster voice model
                     response = client.audio.speech.create(
-                        model="tts-1-echo",  # Using the faster model
+                        model="tts-1",  # Using the faster model
                         voice="alloy",
                         input=chunk,
                     )
