@@ -3,10 +3,9 @@ import streamlit as st
 from openai import OpenAI
 import base64
 import time
-import uuid
+import concurrent.futures
 from voice_api import record_voice
 from config import Config
-import concurrent.futures
 
 # Set page configuration as the very first Streamlit command
 st.set_page_config(page_title="🎙️ Vodafone | Gen AI Consultant", layout="wide")
@@ -69,13 +68,42 @@ def split_text_for_tts(text, max_length=2000):
     
     return chunks
 
-# Function to generate speech for a single chunk
-def generate_speech(chunk):
+# Function to generate speech for all chunks in parallel
+def generate_speech_parallel(text_chunks):
     """
-    Generate speech for a text chunk using OpenAI's TTS API
+    Generate speech for all text chunks in parallel
     
     Args:
-        chunk (str): Text chunk to convert to speech
+        text_chunks (list): List of text chunks
+    
+    Returns:
+        list: List of base64 encoded audio data
+    """
+    audio_data = []
+    
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        future_to_chunk = {executor.submit(generate_single_speech, chunk): i for i, chunk in enumerate(text_chunks)}
+        for future in concurrent.futures.as_completed(future_to_chunk):
+            idx = future_to_chunk[future]
+            try:
+                audio = future.result()
+                if audio:
+                    # Store audio with its original index
+                    audio_data.append((idx, audio))
+            except Exception as e:
+                st.error(f"Error generating speech for chunk {idx}: {str(e)}")
+    
+    # Sort by original chunk order and return just the audio
+    audio_data.sort(key=lambda x: x[0])
+    return [audio for _, audio in audio_data]
+
+# Function to generate speech for a single chunk
+def generate_single_speech(chunk):
+    """
+    Generate speech for a single text chunk
+    
+    Args:
+        chunk (str): Text chunk
     
     Returns:
         str: Base64 encoded audio data
@@ -95,80 +123,47 @@ def generate_speech(chunk):
         st.error(f"❌ TTS chunk generation failed: {str(e)}")
         return None
 
-# Function to handle text-to-speech with sequential playback
+# Function to handle text-to-speech
 def speak_text(text, ai_message):
     """
-    Generate speech using OpenAI's Text-to-Speech API and play sequentially
+    Generate speech using OpenAI's Text-to-Speech API
     
     Args:
         text (str): Text to convert to speech
         ai_message (dict): The AI message for display
     """
     try:
+        # Display the AI message
         print_chat_message(ai_message)
         
         # Split text into chunks that fit within the TTS character limit
         text_chunks = split_text_for_tts(text)
         
-        # Process chunks in parallel to generate audio
-        audio_elements = []
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future_to_chunk = {executor.submit(generate_speech, chunk): i for i, chunk in enumerate(text_chunks)}
-            # Sort by original chunk order
-            for i in range(len(text_chunks)):
-                for future, idx in future_to_chunk.items():
-                    if idx == i and future.done():
-                        b64_audio = future.result()
-                        if b64_audio:
-                            audio_elements.append(b64_audio)
-                        break
+        # Generate speech for all chunks in parallel
+        audio_data_list = generate_speech_parallel(text_chunks)
         
-        # Create sequential audio player with callbacks
-        if audio_elements:
-            # Create unique IDs for each audio element
-            audio_ids = [f"audio-{uuid.uuid4()}" for _ in range(len(audio_elements))]
-            
-            # Create custom JavaScript to handle sequential playback
-            js_code = """
-            <script>
-                const audioIds = %s;
-                const audioElements = [];
+        # Play each audio chunk one by one with autoplay
+        placeholder = st.empty()
+        for i, audio_data in enumerate(audio_data_list):
+            if audio_data:
+                # Create a unique key for each audio element
+                key = f"audio_{i}_{int(time.time())}"
                 
-                function setupAudio() {
-                    for (let i = 0; i < audioIds.length; i++) {
-                        const audio = document.getElementById(audioIds[i]);
-                        audioElements.push(audio);
-                        
-                        // Connect sequential playback
-                        if (i < audioIds.length - 1) {
-                            audio.onended = function() {
-                                audioElements[i+1].play();
-                            };
-                        }
-                    }
-                    
-                    // Start playing the first audio
-                    if (audioElements.length > 0) {
-                        audioElements[0].play();
-                    }
-                }
-                
-                // Setup after a short delay to ensure elements are loaded
-                setTimeout(setupAudio, 100);
-            </script>
-            """ % str(audio_ids)
-            
-            # Add audio elements to the page (hidden)
-            for i, b64_audio in enumerate(audio_elements):
+                # Create HTML for audio element with autoplay
                 audio_html = f"""
-                <audio id="{audio_ids[i]}" preload="auto" hidden>
-                    <source src="data:audio/mp3;base64,{b64_audio}" type="audio/mp3">
+                <audio autoplay="true" onended="this.remove();" key="{key}">
+                    <source src="data:audio/mp3;base64,{audio_data}" type="audio/mp3">
                 </audio>
                 """
-                st.markdown(audio_html, unsafe_allow_html=True)
-            
-            # Add the JavaScript for sequential playback
-            st.markdown(js_code, unsafe_allow_html=True)
+                # Replace the placeholder with the current audio
+                placeholder.markdown(audio_html, unsafe_allow_html=True)
+                
+                # Wait for the audio to complete
+                # Since we can't detect when it's done in Streamlit,
+                # we'll use a time-based estimate (roughly 1 second per 20 characters)
+                chunk_text = text_chunks[i]
+                estimated_duration = len(chunk_text) / 20  # Characters per second
+                time.sleep(max(estimated_duration, 1))  # Minimum 1 second
     
     except Exception as e:
         st.error(f"❌ TTS failed: {str(e)}")
