@@ -3,7 +3,6 @@ import streamlit as st
 from openai import OpenAI
 import base64
 import time
-import concurrent.futures
 from voice_api import record_voice
 from config import Config
 
@@ -30,7 +29,7 @@ def get_base64_image(image_path):
     return base64.b64encode(data).decode()
 
 # Function to split text into chunks of maximum length
-def split_text_for_tts(text, max_length=2000):
+def split_text_for_tts(text, max_length=4000):
     """
     Split text into chunks that fit within the TTS character limit
     
@@ -68,61 +67,6 @@ def split_text_for_tts(text, max_length=2000):
     
     return chunks
 
-# Function to generate speech for all chunks in parallel
-def generate_speech_parallel(text_chunks):
-    """
-    Generate speech for all text chunks in parallel
-    
-    Args:
-        text_chunks (list): List of text chunks
-    
-    Returns:
-        list: List of base64 encoded audio data
-    """
-    audio_data = []
-    
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        future_to_chunk = {executor.submit(generate_single_speech, chunk): i for i, chunk in enumerate(text_chunks)}
-        for future in concurrent.futures.as_completed(future_to_chunk):
-            idx = future_to_chunk[future]
-            try:
-                audio = future.result()
-                if audio:
-                    # Store audio with its original index
-                    audio_data.append((idx, audio))
-            except Exception as e:
-                st.error(f"Error generating speech for chunk {idx}: {str(e)}")
-    
-    # Sort by original chunk order and return just the audio
-    audio_data.sort(key=lambda x: x[0])
-    return [audio for _, audio in audio_data]
-
-# Function to generate speech for a single chunk
-def generate_single_speech(chunk):
-    """
-    Generate speech for a single text chunk
-    
-    Args:
-        chunk (str): Text chunk
-    
-    Returns:
-        str: Base64 encoded audio data
-    """
-    try:
-        # Use a faster voice model
-        response = client.audio.speech.create(
-            model="tts-1-echo",  # Using the faster model
-            voice="alloy",
-            input=chunk,
-        )
-        
-        # Convert response directly to base64
-        audio_bytes = response.read()
-        return base64.b64encode(audio_bytes).decode()
-    except Exception as e:
-        st.error(f"❌ TTS chunk generation failed: {str(e)}")
-        return None
-
 # Function to handle text-to-speech
 def speak_text(text, ai_message):
     """
@@ -139,31 +83,42 @@ def speak_text(text, ai_message):
         # Split text into chunks that fit within the TTS character limit
         text_chunks = split_text_for_tts(text)
         
-        # Generate speech for all chunks in parallel
-        audio_data_list = generate_speech_parallel(text_chunks)
+        # Combine all audio HTML elements into a single string
+        all_audio_html = ""
         
-        # Play each audio chunk one by one with autoplay
-        placeholder = st.empty()
-        for i, audio_data in enumerate(audio_data_list):
-            if audio_data:
-                # Create a unique key for each audio element
-                key = f"audio_{i}_{int(time.time())}"
-                
-                # Create HTML for audio element with autoplay
-                audio_html = f"""
-                <audio autoplay="true" onended="this.remove();" key="{key}">
-                    <source src="data:audio/mp3;base64,{audio_data}" type="audio/mp3">
-                </audio>
-                """
-                # Replace the placeholder with the current audio
-                placeholder.markdown(audio_html, unsafe_allow_html=True)
-                
-                # Wait for the audio to complete
-                # Since we can't detect when it's done in Streamlit,
-                # we'll use a time-based estimate (roughly 1 second per 20 characters)
-                chunk_text = text_chunks[i]
-                estimated_duration = len(chunk_text) / 20  # Characters per second
-                time.sleep(max(estimated_duration, 1))  # Minimum 1 second
+        # Generate each audio chunk sequentially
+        for i, chunk in enumerate(text_chunks):
+            if chunk.strip():  # Skip empty chunks
+                try:
+                    # Use a faster voice model
+                    response = client.audio.speech.create(
+                        model="tts-1-echo",  # Using the faster model
+                        voice="alloy",
+                        input=chunk,
+                    )
+                    
+                    # Convert response directly to base64
+                    audio_bytes = response.read()
+                    b64_audio = base64.b64encode(audio_bytes).decode()
+                    
+                    # Add this audio element to our collection
+                    # The controls attribute allows manual control if needed
+                    all_audio_html += f"""
+                    <audio autoplay="true" style="display:none;">
+                        <source src="data:audio/mp3;base64,{b64_audio}" type="audio/mp3">
+                    </audio>
+                    """
+                    
+                    # Create a placeholder for each chunk of text that was spoken
+                    # This helps the user follow along with what's being said
+                    st.markdown(f"<div style='display:none;'>{chunk}</div>", unsafe_allow_html=True)
+                    
+                except Exception as e:
+                    st.error(f"❌ TTS chunk {i} generation failed: {str(e)}")
+        
+        # Display all audio elements at once
+        if all_audio_html:
+            st.markdown(all_audio_html, unsafe_allow_html=True)
     
     except Exception as e:
         st.error(f"❌ TTS failed: {str(e)}")
