@@ -69,57 +69,56 @@ def split_text_for_tts(text, max_length=4000):
 
 # Function to handle text-to-speech
 def speak_text(text, ai_message):
-    """
-    Generate speech using OpenAI's Text-to-Speech API
-    
-    Args:
-        text (str): Text to convert to speech
-        ai_message (dict): The AI message for display
-    """
     try:
         # Display the AI message
         print_chat_message(ai_message)
-        
-        # Split text into chunks that fit within the TTS character limit
+
+        # Split text into chunks
         text_chunks = split_text_for_tts(text)
-        
-        # Combine all audio HTML elements into a single string
-        all_audio_html = ""
-        
-        # Generate each audio chunk sequentially
+
+        # Prepare list of audio base64 chunks
+        audio_b64_chunks = []
+
         for i, chunk in enumerate(text_chunks):
-            if chunk.strip():  # Skip empty chunks
+            if chunk.strip():
                 try:
-                    # Use a faster voice model
                     response = client.audio.speech.create(
-                        model="tts-1",  # Using the faster model
+                        model="tts-1",  # use correct model
                         voice="alloy",
                         input=chunk,
                     )
-                    
-                    # Convert response directly to base64
                     audio_bytes = response.read()
                     b64_audio = base64.b64encode(audio_bytes).decode()
-                    
-                    # Add this audio element to our collection
-                    # The controls attribute allows manual control if needed
-                    all_audio_html += f"""
-                    <audio autoplay="true" style="display:none;">
-                        <source src="data:audio/mp3;base64,{b64_audio}" type="audio/mp3">
-                    </audio>
-                    """
-                    
-                    # Create a placeholder for each chunk of text that was spoken
-                    # This helps the user follow along with what's being said
-                    st.markdown(f"<div style='display:none;'>{chunk}</div>", unsafe_allow_html=True)
-                    
+                    audio_b64_chunks.append(b64_audio)
                 except Exception as e:
                     st.error(f"❌ TTS chunk {i} generation failed: {str(e)}")
-        
-        # Display all audio elements at once
-        if all_audio_html:
-            st.markdown(all_audio_html, unsafe_allow_html=True)
-    
+
+        # Generate JavaScript to play each chunk sequentially
+        js_chunks = ""
+        for i, b64 in enumerate(audio_b64_chunks):
+            js_chunks += f"""
+                audios[{i}] = new Audio("data:audio/mp3;base64,{b64}");
+            """
+
+        js_play_sequence = """
+        <script>
+            const audios = [];
+            let current = 0;
+
+            function playNext() {
+                if (current < audios.length) {
+                    audios[current].onended = playNext;
+                    audios[current].play();
+                    current++;
+                }
+            }
+
+            """ + js_chunks + """
+            playNext();
+        </script>
+        """
+
+        st.components.v1.html(js_play_sequence, height=0)
     except Exception as e:
         st.error(f"❌ TTS failed: {str(e)}")
 
